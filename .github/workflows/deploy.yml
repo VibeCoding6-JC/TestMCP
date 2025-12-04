@@ -75,12 +75,12 @@ jobs:
             cd ${DEPLOY_PATH}
             
             # Stop existing container if running
-            docker-compose down 2>/dev/null || true
+            docker compose down 2>/dev/null || true
             docker stop mcp-server 2>/dev/null || true
             docker rm mcp-server 2>/dev/null || true
             
-            # Build and run with docker-compose
-            docker-compose up -d --build
+            # Build and run with docker compose
+            docker compose up -d --build
             
             # Show container status
             sleep 3
