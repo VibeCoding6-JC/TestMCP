@@ -47,9 +47,10 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
           echo "🚀 Deploying to server..."
+          echo "Deploy path: ${DEPLOY_PATH}"
           
           # Create deploy directory if not exists
-          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} "mkdir -p ${DEPLOY_PATH}"
+          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} "mkdir -p ${DEPLOY_PATH} && chmod 755 ${DEPLOY_PATH}"
           
           # Copy files using rsync
           rsync -avz --delete \
@@ -58,9 +59,11 @@ jobs:
             --exclude '.github' \
             --exclude '*.ppk' \
             --exclude '*.pem' \
+            --exclude '*.key' \
             --exclude '__pycache__' \
             --exclude '.venv' \
             --exclude 'venv' \
+            --exclude 'convert_ppk.py' \
             ./ ${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/
           
           echo "✅ Files deployed successfully!"
