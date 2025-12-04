@@ -18,6 +18,8 @@ TestMCP/
 │       └── deploy.yml          # GitHub Actions workflow
 ├── src/
 │   └── server.py               # FastMCP server utama
+├── Dockerfile                  # Docker image
+├── docker-compose.yml          # Docker compose config
 ├── requirements.txt            # Dependencies Python
 ├── README.md                   # Dokumentasi ini
 ├── .gitignore                  # Ignore files
@@ -48,9 +50,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Jalankan Server
+### 4. Jalankan Server (Local)
 ```bash
 python src/server.py
+```
+
+### 5. Jalankan dengan Docker (Recommended)
+```bash
+docker-compose up -d --build
 ```
 
 Server akan berjalan di `http://0.0.0.0:6969`

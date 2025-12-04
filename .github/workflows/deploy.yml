@@ -21,12 +21,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run tests (optional)
+      - name: Syntax check
         run: |
           echo "Running basic syntax check..."
           python -m py_compile src/server.py
@@ -49,8 +44,8 @@ jobs:
           echo "🚀 Deploying to server..."
           echo "Deploy path: ${DEPLOY_PATH}"
           
-          # Create deploy directory if not exists
-          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} "mkdir -p ${DEPLOY_PATH} && chmod 755 ${DEPLOY_PATH}"
+          # Create deploy directory
+          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} "mkdir -p ${DEPLOY_PATH}"
           
           # Copy files using rsync
           rsync -avz --delete \
@@ -68,60 +63,39 @@ jobs:
           
           echo "✅ Files deployed successfully!"
 
-      - name: Install dependencies on server
+      - name: Build and Run Docker Container
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          echo "📦 Installing dependencies on server..."
-          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'EOF'
+          echo "🐳 Building and starting Docker container..."
+          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << EOF
             cd ${DEPLOY_PATH}
             
-            # Create virtual environment if not exists
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
-            fi
+            # Stop existing container if running
+            docker-compose down 2>/dev/null || true
+            docker stop mcp-server 2>/dev/null || true
+            docker rm mcp-server 2>/dev/null || true
             
-            # Activate and install dependencies
-            source venv/bin/activate
-            pip install --upgrade pip
-            pip install -r requirements.txt
+            # Build and run with docker-compose
+            docker-compose up -d --build
             
-            echo "✅ Dependencies installed!"
-          EOF
-
-      - name: Restart MCP Server
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          echo "🔄 Restarting MCP server..."
-          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'EOF'
-            cd ${DEPLOY_PATH}
-            
-            # Kill existing process if running
-            pkill -f "python.*server.py" || true
-            sleep 2
-            
-            # Start HTTP server in background
-            source venv/bin/activate
-            nohup python src/server.py > mcp_server.log 2>&1 &
-            
+            # Show container status
             sleep 3
-            echo "✅ MCP HTTP Server started on port 6969!"
-            echo "📡 SSE Endpoint: http://${SSH_HOST}:6969/sse"
+            docker ps | grep mcp-server
+            
+            echo "✅ Docker container started!"
           EOF
 
       - name: Deployment Summary
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "🎉 Deployment completed successfully!"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Server: ${{ secrets.SSH_HOST }}"
-          echo "Port: ${{ secrets.SSH_PORT }}"
-          echo "Path: ${{ secrets.DEPLOY_PATH }}"
+          echo "🌐 MCP Server: http://${SSH_HOST}:6969"
+          echo "📡 SSE Endpoint: http://${SSH_HOST}:6969/sse"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
