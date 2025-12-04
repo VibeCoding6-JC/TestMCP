@@ -1,0 +1,124 @@
+name: Deploy MCP Server
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests (optional)
+        run: |
+          echo "Running basic syntax check..."
+          python -m py_compile src/server.py
+          echo "✅ Syntax check passed!"
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy to Server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          echo "🚀 Deploying to server..."
+          
+          # Create deploy directory if not exists
+          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} "mkdir -p ${DEPLOY_PATH}"
+          
+          # Copy files using rsync
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no" \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '*.ppk' \
+            --exclude '*.pem' \
+            --exclude '__pycache__' \
+            --exclude '.venv' \
+            --exclude 'venv' \
+            ./ ${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/
+          
+          echo "✅ Files deployed successfully!"
+
+      - name: Install dependencies on server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          echo "📦 Installing dependencies on server..."
+          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'EOF'
+            cd ${DEPLOY_PATH}
+            
+            # Create virtual environment if not exists
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            
+            # Activate and install dependencies
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            echo "✅ Dependencies installed!"
+          EOF
+
+      - name: Restart MCP Server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          echo "🔄 Restarting MCP server..."
+          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << 'EOF'
+            cd ${DEPLOY_PATH}
+            
+            # Kill existing process if running
+            pkill -f "python.*server.py" || true
+            sleep 2
+            
+            # Start HTTP server in background
+            source venv/bin/activate
+            nohup python src/server.py > mcp_server.log 2>&1 &
+            
+            sleep 3
+            echo "✅ MCP HTTP Server started on port 6969!"
+            echo "📡 SSE Endpoint: http://${SSH_HOST}:6969/sse"
+          EOF
+
+      - name: Deployment Summary
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 Deployment completed successfully!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Server: ${{ secrets.SSH_HOST }}"
+          echo "Port: ${{ secrets.SSH_PORT }}"
+          echo "Path: ${{ secrets.DEPLOY_PATH }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
