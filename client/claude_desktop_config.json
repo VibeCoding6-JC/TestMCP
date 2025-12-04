@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "simple-mcp-server": {
+      "url": "http://103.164.191.212:6969/sse"
+    }
+  }
+}
