@@ -8,9 +8,16 @@ on:
     branches:
       - main
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     
     steps:
       - name: Checkout code
@@ -27,6 +34,22 @@ jobs:
           python -m py_compile src/server.py
           echo "✅ Syntax check passed!"
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
       - name: Setup SSH Key
         run: |
           mkdir -p ~/.ssh
@@ -40,53 +63,30 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
         run: |
           echo "🚀 Deploying to server..."
-          echo "Deploy path: ${DEPLOY_PATH}"
-          
-          # Create deploy directory
-          ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} "mkdir -p ${DEPLOY_PATH}"
-          
-          # Copy files using rsync
-          rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no" \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude '*.ppk' \
-            --exclude '*.pem' \
-            --exclude '*.key' \
-            --exclude '__pycache__' \
-            --exclude '.venv' \
-            --exclude 'venv' \
-            --exclude 'convert_ppk.py' \
-            ./ ${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/
-          
-          echo "✅ Files deployed successfully!"
-
-      - name: Build and Run Docker Container
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          echo "🐳 Building and starting Docker container..."
           ssh -i ~/.ssh/deploy_key -p ${SSH_PORT} -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST} << EOF
-            cd ${DEPLOY_PATH}
+            # Pull image terbaru dari GitHub Container Registry
+            echo "🐳 Pulling latest image..."
+            docker pull ${IMAGE}
             
-            # Stop existing container if running
-            docker compose down 2>/dev/null || true
+            # Stop dan hapus container lama
             docker stop mcp-server 2>/dev/null || true
             docker rm mcp-server 2>/dev/null || true
             
-            # Build and run with docker compose
-            docker compose up -d --build
+            # Run container baru
+            docker run -d \
+              --name mcp-server \
+              --restart unless-stopped \
+              -p 6969:6969 \
+              ${IMAGE}
             
-            # Show container status
+            # Tampilkan status
             sleep 3
             docker ps | grep mcp-server
             
-            echo "✅ Docker container started!"
+            echo "✅ Container deployed!"
           EOF
 
       - name: Deployment Summary
@@ -98,4 +98,6 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "🌐 MCP Server: http://${SSH_HOST}:6969"
           echo "📡 SSE Endpoint: http://${SSH_HOST}:6969/sse"
+          echo "🐳 Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
